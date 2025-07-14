@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { FaMinus, FaPaperPlane, FaPlay, FaPause, FaPlus, FaRedo } from "react-icons/fa"
+import { MdDelete } from "react-icons/md"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const formatTime = (seconds: number) => {
@@ -370,21 +371,14 @@ export default function BurnEngine() {
   const chartData = (() => {
     // Group by day
     const dayCounts: Record<string, number> = {};
-    let cumulative = 0;
-    const sorted = [...taskHistory].sort((a, b) => a.timestamp - b.timestamp);
-    sorted.forEach((task) => {
+    taskHistory.forEach((task) => {
       const day = new Date(task.timestamp).toLocaleDateString();
       dayCounts[day] = (dayCounts[day] || 0) + 1;
     });
-    // Build cumulative array
-    const result: { day: string; count: number }[] = [];
-    Object.keys(dayCounts)
+    // Build array for chart
+    return Object.keys(dayCounts)
       .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
-      .forEach((day) => {
-        cumulative += dayCounts[day];
-        result.push({ day, count: cumulative });
-      });
-    return result;
+      .map((day) => ({ day, count: dayCounts[day] }));
   })();
 
   // Optionally, render nothing until timer is loaded
@@ -537,6 +531,7 @@ export default function BurnEngine() {
               display: "flex",
               flexDirection: "column",
               alignItems: "flex-start",
+              position: "relative",
             }}
           >
             <span style={{ fontWeight: 500, fontSize: 14 }}>{task.name || <em>Untitled</em>}</span>
@@ -544,13 +539,32 @@ export default function BurnEngine() {
               ${task.amount}
             </span>
             <span style={{ color: "#888", fontSize: 12, marginTop: 2 }}>
-              {new Date(task.timestamp).toLocaleString()}
+              {new Date(task.timestamp).toISOString().replace('T', ' ').slice(0, 16)}
               {typeof task.duration === 'number' && (
                 <span style={{ marginLeft: 8, color: '#3498db' }}>
                   • {Math.floor(task.duration / 60)}m {(task.duration % 60).toString().padStart(2, '0')}s
                 </span>
               )}
             </span>
+            <button
+              onClick={() => {
+                const newHistory = [...taskHistory.slice(0, idx), ...taskHistory.slice(idx + 1)];
+                setTaskHistory(newHistory);
+              }}
+              style={{
+                position: "absolute",
+                top: 8,
+                right: 8,
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "#e74c3c",
+                fontSize: 18,
+              }}
+              title="Delete Task"
+            >
+              <MdDelete />
+            </button>
           </div>
         ))}
       </div>
