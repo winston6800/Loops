@@ -248,6 +248,7 @@ export default function BurnEngine() {
   // Hydration-safe state initialization
   const [hourlyRate, setHourlyRate] = useState<number>(90);
   const [timer, setTimer] = useState<number>(0);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [currentTask, setCurrentTask] = useState<string>("");
   const [taskHistory, setTaskHistory] = useState<{ name: string; amount: string; timestamp: number; duration?: number }[]>([]);
 
@@ -262,13 +263,15 @@ export default function BurnEngine() {
       if (savedTask) setCurrentTask(savedTask);
       const savedHistory = localStorage.getItem("burnEngine_taskHistory");
       if (savedHistory) setTaskHistory(JSON.parse(savedHistory));
+      setHasLoaded(true);
     }
   }, []);
 
   const startTimeRef = useRef<number | null>(null);
 
-  // Always running timer effect
+  // Start timer interval only after timer is loaded
   useEffect(() => {
+    if (!hasLoaded) return;
     startTimeRef.current = Date.now() - timer * 1000;
     const interval = setInterval(() => {
       if (startTimeRef.current) {
@@ -277,7 +280,7 @@ export default function BurnEngine() {
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [hasLoaded, timer]);
 
   // Save state to localStorage whenever it changes
   useEffect(() => {
@@ -384,107 +387,12 @@ export default function BurnEngine() {
     return result;
   })();
 
+  // Optionally, render nothing until timer is loaded
+  if (!hasLoaded) return null;
+
   return (
     <div style={{ minHeight: "100vh", background: "#f8f9fa", padding: "2rem 1rem" }}>
-      {/* Main timer and controls */}
-      <div
-        style={{
-          maxWidth: 400,
-          margin: "0 auto",
-          fontFamily: "Inter, sans-serif",
-          background: "#fff",
-          borderRadius: 12,
-          boxShadow: "0 2px 12px #0001",
-          padding: 24,
-          position: "relative",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-          <span style={{ fontWeight: 600, fontSize: 15 }}>Your hourly value</span>
-          <input
-            type="number"
-            value={hourlyRate}
-            min={1}
-            onChange={(e) => setHourlyRate(Number(e.target.value))}
-            style={{
-              width: 70,
-              border: "1px solid #ddd",
-              borderRadius: 4,
-              padding: "2px 6px",
-              fontWeight: 600,
-              marginLeft: 8,
-            }}
-          />
-          <span style={{ marginLeft: 4, fontWeight: 500, color: "#888" }}>$ / hr</span>
-          <span
-            style={{
-              marginLeft: "auto",
-              color: Number(moneySpent) > 0 ? "#e74c3c" : "#333",
-              fontWeight: 700,
-              fontVariantNumeric: "tabular-nums",
-              fontSize: 16,
-            }}
-          >
-            -${moneySpent}
-          </span>
-        </div>
-        <h2 style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Work on the one thing</h2>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-          <input
-            type="text"
-            value={currentTask}
-            onChange={(e) => setCurrentTask(e.target.value)}
-            style={{
-              flex: 1,
-              border: "none",
-              background: "#f5f5f5",
-              borderRadius: 6,
-              padding: "6px 10px",
-              fontWeight: 500,
-            }}
-          />
-          <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{formatTime(timer)}</span>
-        </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          <button
-            onClick={handleFinishTask}
-            style={{
-              flex: 1,
-              padding: "8px 0",
-              borderRadius: 6,
-              background: "#3498db",
-              color: "#fff",
-              fontWeight: 700,
-              border: "none",
-              cursor: "pointer",
-            }}
-          >
-            Finish Task
-          </button>
-        </div>
-      </div>
-
-      <div
-        style={{
-          maxWidth: 400,
-          margin: "1rem auto",
-          background: "#fff",
-          borderRadius: 12,
-          boxShadow: "0 2px 12px #0001",
-          padding: 20,
-          textAlign: "center",
-        }}
-      >
-        <div style={{ fontSize: 28, fontWeight: 700, color: "#e74c3c", marginBottom: 8 }}>${moneySpent}</div>
-        <div style={{ fontSize: 14, color: "#666", display: "flex", justifyContent: "center", gap: "16px" }}>
-          <span>${perMinuteSpent}/min</span>
-          <span>${perSecondSpent}/sec</span>
-        </div>
-      </div>
-
-      <OpenLoopsDashboard mainTaskActive={true} pauseMainTask={() => {}} />
-
-      {/* Flex row for task history and chart */}
+      {/* Flex row for main timer and cumulative chart */}
       <div
         style={{
           display: "flex",
@@ -493,50 +401,100 @@ export default function BurnEngine() {
           alignItems: "flex-start",
           gap: 24,
           maxWidth: 950,
-          margin: "2rem auto 0 auto",
+          margin: "0 auto 2rem auto",
         }}
       >
-        {/* Task History */}
+        {/* Main timer and controls */}
         <div
           style={{
             flex: 1,
             maxWidth: 400,
-            background: "#fafbfc",
-            borderRadius: 8,
-            padding: 16,
-            boxShadow: "0 1px 4px #0001",
+            fontFamily: "Inter, sans-serif",
+            background: "#fff",
+            borderRadius: 12,
+            boxShadow: "0 2px 12px #0001",
+            padding: 24,
+            position: "relative",
           }}
         >
-          <h4 style={{ margin: "0 0 12px 0", fontWeight: 700, fontSize: 16 }}>Task History</h4>
-          {taskHistory.length === 0 && <div style={{ color: "#bbb", fontSize: 14 }}>No tasks finished yet.</div>}
-          {taskHistory.map((task, idx) => (
-            <div
-              key={idx}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            <span style={{ fontWeight: 600, fontSize: 15 }}>Your hourly value</span>
+            <input
+              type="number"
+              value={hourlyRate}
+              min={1}
+              onChange={(e) => setHourlyRate(Number(e.target.value))}
               style={{
-                marginBottom: 8,
-                padding: 12,
-                background: "#fff",
-                borderRadius: 6,
-                boxShadow: "0 1px 2px #0001",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
+                width: 70,
+                border: "1px solid #ddd",
+                borderRadius: 4,
+                padding: "2px 6px",
+                fontWeight: 600,
+                marginLeft: 8,
+              }}
+            />
+            <span style={{ marginLeft: 4, fontWeight: 500, color: "#888" }}>$ / hr</span>
+            <span
+              style={{
+                marginLeft: "auto",
+                color: Number(moneySpent) > 0 ? "#e74c3c" : "#333",
+                fontWeight: 700,
+                fontVariantNumeric: "tabular-nums",
+                fontSize: 16,
               }}
             >
-              <span style={{ fontWeight: 500, fontSize: 14 }}>{task.name || <em>Untitled</em>}</span>
-              <span style={{ color: "#e74c3c", fontWeight: 700, fontVariantNumeric: "tabular-nums", marginLeft: 0, fontSize: 14 }}>
-                ${task.amount}
-              </span>
-              <span style={{ color: "#888", fontSize: 12, marginTop: 2 }}>
-                {new Date(task.timestamp).toLocaleString()}
-                {typeof task.duration === 'number' && (
-                  <span style={{ marginLeft: 8, color: '#3498db' }}>
-                    • {Math.floor(task.duration / 60)}m {(task.duration % 60).toString().padStart(2, '0')}s
-                  </span>
-                )}
-              </span>
-            </div>
-          ))}
+              -${moneySpent}
+            </span>
+          </div>
+          <h2 style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Work on the one thing</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+            <input
+              type="text"
+              value={currentTask}
+              onChange={(e) => setCurrentTask(e.target.value)}
+              style={{
+                flex: 1,
+                border: "none",
+                background: "#f5f5f5",
+                borderRadius: 6,
+                padding: "6px 10px",
+                fontWeight: 500,
+              }}
+            />
+            <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{formatTime(timer)}</span>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <button
+              onClick={handleFinishTask}
+              style={{
+                flex: 1,
+                padding: "8px 0",
+                borderRadius: 6,
+                background: "#3498db",
+                color: "#fff",
+                fontWeight: 700,
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              Finish Task
+            </button>
+          </div>
+          <div
+            style={{
+              fontSize: 28,
+              fontWeight: 700,
+              color: "#e74c3c",
+              marginBottom: 8,
+              textAlign: "center",
+            }}
+          >
+            ${moneySpent}
+          </div>
+          <div style={{ fontSize: 14, color: "#666", display: "flex", justifyContent: "center", gap: "16px" }}>
+            <span>${perMinuteSpent}/min</span>
+            <span>${perSecondSpent}/sec</span>
+          </div>
         </div>
         {/* Cumulative Line Chart */}
         <div style={{ flex: 1, maxWidth: 500, background: "#fff", borderRadius: 8, padding: 16, boxShadow: "0 1px 4px #0001" }}>
@@ -551,6 +509,50 @@ export default function BurnEngine() {
             </LineChart>
           </ResponsiveContainer>
         </div>
+      </div>
+
+      {/* Open Loops and Task History below */}
+      <OpenLoopsDashboard mainTaskActive={true} pauseMainTask={() => {}} />
+      <div
+        style={{
+          maxWidth: 400,
+          background: "#fafbfc",
+          borderRadius: 8,
+          padding: 16,
+          boxShadow: "0 1px 4px #0001",
+          margin: "2rem auto 0 auto",
+        }}
+      >
+        <h4 style={{ margin: "0 0 12px 0", fontWeight: 700, fontSize: 16 }}>Task History</h4>
+        {taskHistory.length === 0 && <div style={{ color: "#bbb", fontSize: 14 }}>No tasks finished yet.</div>}
+        {taskHistory.map((task, idx) => (
+          <div
+            key={idx}
+            style={{
+              marginBottom: 8,
+              padding: 12,
+              background: "#fff",
+              borderRadius: 6,
+              boxShadow: "0 1px 2px #0001",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-start",
+            }}
+          >
+            <span style={{ fontWeight: 500, fontSize: 14 }}>{task.name || <em>Untitled</em>}</span>
+            <span style={{ color: "#e74c3c", fontWeight: 700, fontVariantNumeric: "tabular-nums", marginLeft: 0, fontSize: 14 }}>
+              ${task.amount}
+            </span>
+            <span style={{ color: "#888", fontSize: 12, marginTop: 2 }}>
+              {new Date(task.timestamp).toLocaleString()}
+              {typeof task.duration === 'number' && (
+                <span style={{ marginLeft: 8, color: '#3498db' }}>
+                  • {Math.floor(task.duration / 60)}m {(task.duration % 60).toString().padStart(2, '0')}s
+                </span>
+              )}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
