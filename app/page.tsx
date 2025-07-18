@@ -251,7 +251,38 @@ export default function BurnEngine() {
   const [timer, setTimer] = useState<number>(0);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [currentTask, setCurrentTask] = useState<string>("");
-  const [taskHistory, setTaskHistory] = useState<{ name: string; amount: string; timestamp: number; duration?: number }[]>([]);
+  const [currentTaskCategory, setCurrentTaskCategory] = useState<string>("rock");
+  const [taskHistory, setTaskHistory] = useState<{ name: string; amount: string; timestamp: number; duration?: number; category: string }[]>([]);
+  const [showMinerals, setShowMinerals] = useState<boolean>(false);
+
+  // Data migration function
+  const migrateData = (data: any, currentVersion: string) => {
+    const savedVersion = localStorage.getItem("burnEngine_dataVersion");
+    
+    // Create backup of existing data before migration
+    if (!savedVersion && data) {
+      localStorage.setItem("burnEngine_backup_" + Date.now(), JSON.stringify(data));
+    }
+    
+    // If no version saved, this is the first time or old data
+    if (!savedVersion) {
+      // Migrate to version 1.1 (add category field)
+      if (Array.isArray(data)) {
+        return data.map((task: any) => ({
+          ...task,
+          category: task.category || "rock" // Default to rock for existing tasks
+        }));
+      }
+    }
+    
+    // For future migrations, you can add more version checks here
+    // Example:
+    // if (savedVersion === "1.1" && currentVersion === "1.2") {
+    //   // Migrate from 1.1 to 1.2
+    // }
+    
+    return data;
+  };
 
   // On mount, load state from localStorage (browser only)
   useEffect(() => {
@@ -262,8 +293,18 @@ export default function BurnEngine() {
       if (savedTimer) setTimer(Number(savedTimer));
       const savedTask = localStorage.getItem("burnEngine_currentTask");
       if (savedTask) setCurrentTask(savedTask);
+      const savedCategory = localStorage.getItem("burnEngine_currentTaskCategory");
+      if (savedCategory) setCurrentTaskCategory(savedCategory);
       const savedHistory = localStorage.getItem("burnEngine_taskHistory");
-      if (savedHistory) setTaskHistory(JSON.parse(savedHistory));
+      if (savedHistory) {
+        const parsedHistory = JSON.parse(savedHistory);
+        // Migrate existing data to include category field
+        const migratedHistory = migrateData(parsedHistory, "1.1");
+        setTaskHistory(migratedHistory);
+      }
+      
+      // Set current data version
+      localStorage.setItem("burnEngine_dataVersion", "1.1");
       setHasLoaded(true);
     }
   }, []);
@@ -306,29 +347,14 @@ export default function BurnEngine() {
   }, [currentTask])
   useEffect(() => {
     if (typeof window !== "undefined") {
+      localStorage.setItem("burnEngine_currentTaskCategory", currentTaskCategory)
+    }
+  }, [currentTaskCategory])
+  useEffect(() => {
+    if (typeof window !== "undefined") {
       localStorage.setItem("burnEngine_taskHistory", JSON.stringify(taskHistory))
     }
   }, [taskHistory])
-
-  // Main work timer
-  // useEffect(() => {
-  //   let interval: ReturnType<typeof setInterval> | null = null
-  //   if (isRunning) {
-  //     // Store the start time when timer starts
-  //     startTimeRef.current = Date.now() - timer * 1000
-  //     interval = setInterval(() => {
-  //       if (startTimeRef.current) {
-  //         const elapsedSeconds = Math.floor((Date.now() - startTimeRef.current) / 1000)
-  //         setTimer(elapsedSeconds)
-  //       }
-  //     }, 1000)
-  //   } else {
-  //     startTimeRef.current = null
-  //   }
-  //   return () => {
-  //     if (interval) clearInterval(interval)
-  //   }
-  // }, [isRunning])
 
   const moneySpent = ((timer / 3600) * hourlyRate).toFixed(2)
   const perMinuteSpent = (hourlyRate / 60).toFixed(2)
@@ -358,6 +384,7 @@ export default function BurnEngine() {
           amount: moneySpent,
           timestamp: Date.now(),
           duration: timer, // store duration in seconds
+          category: currentTaskCategory,
         },
         ...taskHistory,
       ]);
@@ -369,16 +396,37 @@ export default function BurnEngine() {
 
   // Prepare data for cumulative line chart
   const chartData = (() => {
-    // Group by day
-    const dayCounts: Record<string, number> = {};
-    taskHistory.forEach((task) => {
-      const day = new Date(task.timestamp).toLocaleDateString();
-      dayCounts[day] = (dayCounts[day] || 0) + 1;
-    });
-    // Build array for chart
-    return Object.keys(dayCounts)
-      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
-      .map((day) => ({ day, count: dayCounts[day] }));
+    if (showMinerals) {
+      // Group by day and category for minerals view
+      const dayCategoryCounts: Record<string, { rock: number; pebble: number; sand: number }> = {};
+      taskHistory.forEach((task) => {
+        const day = new Date(task.timestamp).toLocaleDateString();
+        if (!dayCategoryCounts[day]) {
+          dayCategoryCounts[day] = { rock: 0, pebble: 0, sand: 0 };
+        }
+        dayCategoryCounts[day][task.category as keyof typeof dayCategoryCounts[typeof day]]++;
+      });
+      // Build array for chart
+      return Object.keys(dayCategoryCounts)
+        .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
+        .map((day) => ({ 
+          day, 
+          rock: dayCategoryCounts[day].rock,
+          pebble: dayCategoryCounts[day].pebble,
+          sand: dayCategoryCounts[day].sand
+        }));
+    } else {
+      // Group by day for regular view
+      const dayCounts: Record<string, number> = {};
+      taskHistory.forEach((task) => {
+        const day = new Date(task.timestamp).toLocaleDateString();
+        dayCounts[day] = (dayCounts[day] || 0) + 1;
+      });
+      // Build array for chart
+      return Object.keys(dayCounts)
+        .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
+        .map((day) => ({ day, count: dayCounts[day] }));
+    }
   })();
 
   // Optionally, render nothing until timer is loaded
@@ -442,6 +490,23 @@ export default function BurnEngine() {
           </div>
           <h2 style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Work on the one thing</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+            <select
+              value={currentTaskCategory}
+              onChange={(e) => setCurrentTaskCategory(e.target.value)}
+              style={{
+                border: "1px solid #ddd",
+                borderRadius: 4,
+                padding: "6px 8px",
+                fontWeight: 500,
+                background: "#f5f5f5",
+                fontSize: 14,
+                minWidth: 80,
+              }}
+            >
+              <option value="rock">Rock</option>
+              <option value="pebble">Pebble</option>
+              <option value="sand">Sand</option>
+            </select>
             <input
               type="text"
               value={currentTask}
@@ -492,14 +557,41 @@ export default function BurnEngine() {
         </div>
         {/* Cumulative Line Chart */}
         <div style={{ flex: 1, maxWidth: 500, background: "#fff", borderRadius: 8, padding: 16, boxShadow: "0 1px 4px #0001" }}>
-          <h4 style={{ margin: "0 0 12px 0", fontWeight: 700, fontSize: 16 }}>Cumulative Tasks Completed</h4>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <h4 style={{ margin: 0, fontWeight: 700, fontSize: 16 }}>
+              {showMinerals ? "Show Minerals" : "Cumulative Tasks Completed"}
+            </h4>
+            <button
+              onClick={() => setShowMinerals(!showMinerals)}
+              style={{
+                background: showMinerals ? "#3498db" : "#f1f1f1",
+                color: showMinerals ? "#fff" : "#333",
+                border: "none",
+                borderRadius: 4,
+                padding: "4px 8px",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {showMinerals ? "Show All" : "Show Minerals"}
+            </button>
+          </div>
           <ResponsiveContainer width="100%" height={250}>
             <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="day" />
               <YAxis allowDecimals={false} />
               <Tooltip />
-              <Line type="monotone" dataKey="count" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} />
+              {showMinerals ? (
+                <>
+                  <Line type="monotone" dataKey="rock" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} name="Rocks" />
+                  <Line type="monotone" dataKey="pebble" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} name="Pebbles" />
+                  <Line type="monotone" dataKey="sand" stroke="#95a5a6" strokeWidth={3} dot={{ r: 4 }} name="Sand" />
+                </>
+              ) : (
+                <Line type="monotone" dataKey="count" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} />
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -534,7 +626,22 @@ export default function BurnEngine() {
               position: "relative",
             }}
           >
-            <span style={{ fontWeight: 500, fontSize: 14 }}>{task.name || <em>Untitled</em>}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ fontWeight: 500, fontSize: 14 }}>{task.name || <em>Untitled</em>}</span>
+              <span
+                style={{
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  background: task.category === "rock" ? "#e74c3c" : task.category === "pebble" ? "#f39c12" : "#95a5a6",
+                  color: "#fff",
+                }}
+              >
+                {task.category}
+              </span>
+            </div>
             <span style={{ color: "#e74c3c", fontWeight: 700, fontVariantNumeric: "tabular-nums", marginLeft: 0, fontSize: 14 }}>
               ${task.amount}
             </span>
