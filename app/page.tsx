@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo, memo } from "react"
 import { FaMinus, FaPaperPlane, FaPlay, FaPause, FaPlus, FaRedo } from "react-icons/fa"
 import { MdDelete } from "react-icons/md"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -27,6 +27,27 @@ interface Loop {
   isActive: boolean
   rate: number // $/hr
 }
+
+// Memoized chart component to prevent unnecessary re-renders
+const MemoizedChart = memo(({ chartData, showMinerals }: { chartData: any[]; showMinerals: boolean }) => (
+  <ResponsiveContainer width="100%" height={250}>
+    <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+      <CartesianGrid strokeDasharray="3 3" />
+      <XAxis dataKey="day" />
+      <YAxis allowDecimals={false} />
+      <Tooltip />
+      {showMinerals ? (
+        <>
+          <Line type="monotone" dataKey="rock" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} name="Rocks" isAnimationActive={false} />
+          <Line type="monotone" dataKey="pebble" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} name="Pebbles" isAnimationActive={false} />
+          <Line type="monotone" dataKey="sand" stroke="#95a5a6" strokeWidth={3} dot={{ r: 4 }} name="Sand" isAnimationActive={false} />
+        </>
+      ) : (
+        <Line type="monotone" dataKey="count" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} isAnimationActive={false} />
+      )}
+    </LineChart>
+  </ResponsiveContainer>
+));
 
 function OpenLoopsDashboard({ mainTaskActive, pauseMainTask }: { mainTaskActive: boolean; pauseMainTask: () => void }) {
   const [loops, setLoops] = useState<Loop[]>(() => {
@@ -253,7 +274,10 @@ export default function BurnEngine() {
   const [currentTask, setCurrentTask] = useState<string>("");
   const [currentTaskCategory, setCurrentTaskCategory] = useState<string>("rock");
   const [taskHistory, setTaskHistory] = useState<{ name: string; amount: string; timestamp: number; duration?: number; category: string }[]>([]);
-  const [showMinerals, setShowMinerals] = useState<boolean>(false);
+  const [showMinerals, setShowMinerals] = useState<boolean>(true);
+  const [taskHistoryMinimized, setTaskHistoryMinimized] = useState<boolean>(false);
+  const [loginStreak, setLoginStreak] = useState<number>(0);
+  const [lastLoginDate, setLastLoginDate] = useState<string>("");
 
   // Data migration function
   const migrateData = (data: any, currentVersion: string) => {
@@ -301,6 +325,62 @@ export default function BurnEngine() {
         // Migrate existing data to include category field
         const migratedHistory = migrateData(parsedHistory, "1.1");
         setTaskHistory(migratedHistory);
+      }
+      
+      const savedShowMinerals = localStorage.getItem("burnEngine_showMinerals");
+      if (savedShowMinerals !== null) {
+        setShowMinerals(JSON.parse(savedShowMinerals));
+      }
+      
+      const savedTaskHistoryMinimized = localStorage.getItem("burnEngine_taskHistoryMinimized");
+      if (savedTaskHistoryMinimized !== null) {
+        setTaskHistoryMinimized(JSON.parse(savedTaskHistoryMinimized));
+      }
+      
+      // Load login streak data
+      const savedLoginStreak = localStorage.getItem("burnEngine_loginStreak");
+      const savedLastLoginDate = localStorage.getItem("burnEngine_lastLoginDate");
+      
+      if (savedLoginStreak && savedLastLoginDate) {
+        const currentDate = new Date().toDateString();
+        const lastLogin = savedLastLoginDate;
+        
+        if (currentDate === lastLogin) {
+          // Already logged in today, keep current streak
+          setLoginStreak(Number(savedLoginStreak));
+          setLastLoginDate(lastLogin);
+        } else {
+          // Check if it's consecutive days
+          const lastLoginTime = new Date(lastLogin).getTime();
+          const currentTime = new Date().getTime();
+          const daysDiff = Math.floor((currentTime - lastLoginTime) / (1000 * 60 * 60 * 24));
+          
+          if (daysDiff === 1) {
+            // Consecutive day, increment streak
+            const newStreak = Number(savedLoginStreak) + 1;
+            setLoginStreak(newStreak);
+            setLastLoginDate(currentDate);
+            localStorage.setItem("burnEngine_loginStreak", newStreak.toString());
+            localStorage.setItem("burnEngine_lastLoginDate", currentDate);
+          } else if (daysDiff > 1) {
+            // Streak broken, reset to 1
+            setLoginStreak(1);
+            setLastLoginDate(currentDate);
+            localStorage.setItem("burnEngine_loginStreak", "1");
+            localStorage.setItem("burnEngine_lastLoginDate", currentDate);
+          } else {
+            // Same day, keep current streak
+            setLoginStreak(Number(savedLoginStreak));
+            setLastLoginDate(lastLogin);
+          }
+        }
+      } else {
+        // First time logging in
+        const currentDate = new Date().toDateString();
+        setLoginStreak(1);
+        setLastLoginDate(currentDate);
+        localStorage.setItem("burnEngine_loginStreak", "1");
+        localStorage.setItem("burnEngine_lastLoginDate", currentDate);
       }
       
       // Set current data version
@@ -355,6 +435,16 @@ export default function BurnEngine() {
       localStorage.setItem("burnEngine_taskHistory", JSON.stringify(taskHistory))
     }
   }, [taskHistory])
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("burnEngine_showMinerals", JSON.stringify(showMinerals))
+    }
+  }, [showMinerals])
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("burnEngine_taskHistoryMinimized", JSON.stringify(taskHistoryMinimized))
+    }
+  }, [taskHistoryMinimized])
 
   const moneySpent = ((timer / 3600) * hourlyRate).toFixed(2)
   const perMinuteSpent = (hourlyRate / 60).toFixed(2)
@@ -395,10 +485,25 @@ export default function BurnEngine() {
   };
 
   // Prepare data for cumulative line chart
-  const chartData = (() => {
+  const chartData = useMemo(() => {
+    // Generate historical dates (last 7 days) with 0 values
+    const historicalDates: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      historicalDates.push(date.toLocaleDateString());
+    }
+
     if (showMinerals) {
       // Group by day and category for minerals view
       const dayCategoryCounts: Record<string, { rock: number; pebble: number; sand: number }> = {};
+      
+      // Initialize all historical dates with 0 values
+      historicalDates.forEach(day => {
+        dayCategoryCounts[day] = { rock: 0, pebble: 0, sand: 0 };
+      });
+      
+      // Add actual task data
       taskHistory.forEach((task) => {
         const day = new Date(task.timestamp).toLocaleDateString();
         if (!dayCategoryCounts[day]) {
@@ -406,6 +511,7 @@ export default function BurnEngine() {
         }
         dayCategoryCounts[day][task.category as keyof typeof dayCategoryCounts[typeof day]]++;
       });
+      
       // Build array for chart
       return Object.keys(dayCategoryCounts)
         .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
@@ -418,16 +524,24 @@ export default function BurnEngine() {
     } else {
       // Group by day for regular view
       const dayCounts: Record<string, number> = {};
+      
+      // Initialize all historical dates with 0 values
+      historicalDates.forEach(day => {
+        dayCounts[day] = 0;
+      });
+      
+      // Add actual task data
       taskHistory.forEach((task) => {
         const day = new Date(task.timestamp).toLocaleDateString();
         dayCounts[day] = (dayCounts[day] || 0) + 1;
       });
+      
       // Build array for chart
       return Object.keys(dayCounts)
         .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
         .map((day) => ({ day, count: dayCounts[day] }));
     }
-  })();
+  }, [showMinerals, taskHistory]);
 
   // Optionally, render nothing until timer is loaded
   if (!hasLoaded) return null;
@@ -488,6 +602,36 @@ export default function BurnEngine() {
               -${moneySpent}
             </span>
           </div>
+          {loginStreak > 0 && (
+            <div style={{ 
+              display: "flex", 
+              alignItems: "center", 
+              gap: 8, 
+              marginBottom: 12,
+              padding: "8px 12px",
+              background: loginStreak >= 7 ? "#e8f5e8" : "#fff3cd",
+              borderRadius: 6,
+              border: `1px solid ${loginStreak >= 7 ? "#28a745" : "#ffc107"}`
+            }}>
+              <span style={{ fontSize: 16 }}>🔥</span>
+              <span style={{ 
+                fontWeight: 600, 
+                fontSize: 14,
+                color: loginStreak >= 7 ? "#28a745" : "#856404"
+              }}>
+                {loginStreak} day{loginStreak !== 1 ? 's' : ''} streak
+              </span>
+              {loginStreak >= 7 && (
+                <span style={{ 
+                  fontSize: 12, 
+                  color: "#28a745",
+                  fontWeight: 500
+                }}>
+                  • Keep it up!
+                </span>
+              )}
+            </div>
+          )}
           <h2 style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Work on the one thing</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
             <select
@@ -577,23 +721,7 @@ export default function BurnEngine() {
               {showMinerals ? "Show All" : "Show Minerals"}
             </button>
           </div>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="day" />
-              <YAxis allowDecimals={false} />
-              <Tooltip />
-              {showMinerals ? (
-                <>
-                  <Line type="monotone" dataKey="rock" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} name="Rocks" />
-                  <Line type="monotone" dataKey="pebble" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} name="Pebbles" />
-                  <Line type="monotone" dataKey="sand" stroke="#95a5a6" strokeWidth={3} dot={{ r: 4 }} name="Sand" />
-                </>
-              ) : (
-                <Line type="monotone" dataKey="count" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} />
-              )}
-            </LineChart>
-          </ResponsiveContainer>
+          <MemoizedChart chartData={chartData} showMinerals={showMinerals} />
         </div>
       </div>
 
@@ -609,9 +737,30 @@ export default function BurnEngine() {
           margin: "2rem auto 0 auto",
         }}
       >
-        <h4 style={{ margin: "0 0 12px 0", fontWeight: 700, fontSize: 16 }}>Task History</h4>
-        {taskHistory.length === 0 && <div style={{ color: "#bbb", fontSize: 14 }}>No tasks finished yet.</div>}
-        {taskHistory.map((task, idx) => (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <h4 style={{ margin: 0, fontWeight: 700, fontSize: 16 }}>Task History</h4>
+          <button
+            onClick={() => setTaskHistoryMinimized((m) => !m)}
+            style={{
+              background: taskHistoryMinimized ? "#f1f1f1" : "#eee",
+              border: "none",
+              borderRadius: 8,
+              boxShadow: "0 1px 4px #0001",
+              fontSize: 18,
+              cursor: "pointer",
+              color: "#888",
+              padding: 6,
+              transition: "background 0.2s",
+            }}
+            title={taskHistoryMinimized ? "Expand" : "Minimize"}
+          >
+            {taskHistoryMinimized ? <FaPlus /> : <FaMinus />}
+          </button>
+        </div>
+        {!taskHistoryMinimized && (
+          <>
+            {taskHistory.length === 0 && <div style={{ color: "#bbb", fontSize: 14 }}>No tasks finished yet.</div>}
+            {taskHistory.map((task, idx) => (
           <div
             key={idx}
             style={{
@@ -673,7 +822,9 @@ export default function BurnEngine() {
               <MdDelete />
             </button>
           </div>
-        ))}
+            ))}
+          </>
+        )}
       </div>
     </div>
   );
